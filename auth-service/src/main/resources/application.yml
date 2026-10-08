@@ -1,0 +1,57 @@
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: auth-service
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:auth_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${DB_USERNAME:airline}
+    password: ${DB_PASSWORD:airline}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none      # schema is owned by Flyway
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+
+app:
+  jwt:
+    # CONTRACT: the api-gateway (and any service that verifies tokens) must use this exact secret.
+    # The default below is for local development only - always set JWT_SECRET elsewhere (min 32 chars).
+    secret: ${JWT_SECRET:dev-only-secret-change-me-dev-only-secret-change-me}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:60}
+    issuer: airline-auth-service
+  bootstrap:
+    # Optional: creates (or promotes) this user as ADMIN at startup. Leave empty to skip.
+    admin-email: ${BOOTSTRAP_ADMIN_EMAIL:}
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+# Registers as AUTH-SERVICE. Set EUREKA_ENABLED=false to run this service completely on its own.
+eureka:
+  client:
+    enabled: ${EUREKA_ENABLED:true}
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+  instance:
+    prefer-ip-address: true
+
+logging:
+  level:
+    com.airline: INFO

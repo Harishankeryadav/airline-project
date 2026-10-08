@@ -1,0 +1,197 @@
+# Two ways to use this file:
+#
+#   1. Infrastructure only (what ./scripts/run-all.sh uses; you run the services yourself with Maven):
+#        docker compose up -d
+#
+#   2. The WHOLE system in containers (builds every service and the web app, nothing to install but Docker):
+#        docker compose --profile app up --build -d
+#      Then open http://localhost:5173 (web app). Stop with: docker compose --profile app down
+#      (add -v to also delete the databases).
+#
+# Dev-only defaults - override with a .env file (see .env.example).
+
+x-java-service: &java-service
+  profiles: ["app"]
+  restart: unless-stopped
+  environment: &common-env
+    DB_HOST: mysql
+    DB_USERNAME: ${DB_USERNAME:-airline}
+    DB_PASSWORD: ${DB_PASSWORD:-airline}
+    REDIS_HOST: redis
+    RABBITMQ_HOST: rabbitmq
+    EUREKA_URL: http://discovery-server:8761/eureka
+    # One secret for every service that signs or verifies tokens. Set JWT_SECRET to your own value outside local use.
+    JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-dev-only-secret-change-me}
+
+services:
+  # ====================================================== infrastructure
+  mysql:
+    image: mysql:8.0
+    container_name: airline-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_USER: ${DB_USERNAME:-airline}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-airline}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: airline-redis
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: airline-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # Catches every outgoing email so reminder-service can be tested without a real mail account.
+  # Web UI: http://localhost:8025   (SMTP on 1025)
+  mailpit:
+    image: axllent/mailpit
+    container_name: airline-mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  # ====================================================== application (profile "app")
+  discovery-server:
+    <<: *java-service
+    build: { context: ., dockerfile: Dockerfile.service, args: { MODULE: discovery-server } }
+    image: airline/discovery-server
+    ports:
+      - "8761:8761"          # Eureka dashboard
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8761/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  flights-service:
+    <<: *java-service
+    build: { context: ., dockerfile: Dockerfile.service, args: { MODULE: flights-service } }
+    image: airline/flights-service
+    # No "ports:" on purpose. flights-service has no login of its own, so only the gateway (inside this network) may reach it.
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_started }
+      discovery-server: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8081/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  auth-service:
+    <<: *java-service
+    build: { context: ., dockerfile: Dockerfile.service, args: { MODULE: auth-service } }
+    image: airline/auth-service
+    environment:
+      <<: *common-env
+      # Creates the first administrator. DEV DEFAULTS - set your own in .env, and change the password after the first sign-in.
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe123!}
+    depends_on:
+      mysql: { condition: service_healthy }
+      discovery-server: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8082/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  booking-service:
+    <<: *java-service
+    build: { context: ., dockerfile: Dockerfile.service, args: { MODULE: booking-service } }
+    image: airline/booking-service
+    depends_on:
+      mysql: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      discovery-server: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8083/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  reminder-service:
+    <<: *java-service
+    build: { context: ., dockerfile: Dockerfile.service, args: { MODULE: reminder-service } }
+    image: airline/reminder-service
+    environment:
+      <<: *common-env
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-false}
+      MAIL_STARTTLS: ${MAIL_STARTTLS:-false}
+      MAIL_FROM: ${MAIL_FROM:-noreply@airline.local}
+    depends_on:
+      mysql: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      discovery-server: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8084/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  api-gateway:
+    <<: *java-service
+    build: { context: ., dockerfile: Dockerfile.service, args: { MODULE: api-gateway } }
+    image: airline/api-gateway
+    environment:
+      <<: *common-env
+      # The browser address of the web app, so the gateway's CORS check accepts it.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    ports:
+      - "8080:8080"          # the ONLY service port published - everything goes through the gateway
+    depends_on:
+      redis: { condition: service_started }
+      discovery-server: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  frontend:
+    profiles: ["app"]
+    restart: unless-stopped
+    build:
+      context: ./frontend
+      args:
+        # Must be an address the BROWSER can reach (not a container name).
+        VITE_API_BASE_URL: ${PUBLIC_API_URL:-http://localhost:8080}
+        VITE_CURRENCY: ${VITE_CURRENCY:-INR}
+    image: airline/frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      api-gateway: { condition: service_healthy }
+
+volumes:
+  mysql-data:

@@ -1,0 +1,15 @@
+# build
+target/
+*.class
+# IDE
+.idea/
+*.iml
+.vscode/
+# secrets - never commit these (the original repo committed config.json with DB credentials)
+.env
+*.env
+application-local.yml
+application-secrets.yml
+
+# runtime
+logs/

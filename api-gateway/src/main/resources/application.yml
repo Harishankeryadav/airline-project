@@ -1,0 +1,122 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  cloud:
+    gateway:
+      httpclient:
+        connect-timeout: 3000
+        response-timeout: 15s
+      # CORS for the React app (browser). Downstream services add no CORS headers of their own.
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+            allowed-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
+            allowed-headers: "*"
+            allow-credentials: false      # tokens travel in the Authorization header, not cookies
+            max-age: 3600
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials, RETAIN_FIRST
+      # Public path prefixes are the ones the React app already uses. lb:// = look the service up in Eureka.
+      # Role / login rules live in AccessControlFilter + AccessPolicy (they run BEFORE routing).
+      # Rate limit = token bucket per client IP and per route (see GatewayConfig#ipKeyResolver), stored in Redis.
+      # If Redis is down, requests are allowed (fail open) rather than blocking everyone.
+      routes:
+        # Stricter limit on login/signup (brute-force protection). Listed first so it wins over the general auth route.
+        - id: auth-login
+          uri: lb://AUTH-SERVICE
+          order: -1
+          predicates:
+            - Path=/authservice/api/v1/signin,/authservice/api/v1/signup
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@ipKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_LOGIN_PER_SECOND:1}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_LOGIN_BURST:10}
+                redis-rate-limiter.requestedTokens: 1
+
+        - id: auth
+          uri: lb://AUTH-SERVICE
+          predicates:
+            - Path=/authservice/**
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@ipKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_PER_SECOND:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                redis-rate-limiter.requestedTokens: 1
+
+        - id: flights
+          uri: lb://FLIGHTS-SERVICE
+          predicates:
+            - Path=/flightsservice/**
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@ipKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_PER_SECOND:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                redis-rate-limiter.requestedTokens: 1
+
+        - id: booking
+          uri: lb://BOOKING-SERVICE
+          predicates:
+            - Path=/bookingservice/**
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@ipKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_PER_SECOND:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                redis-rate-limiter.requestedTokens: 1
+
+        - id: reminder
+          uri: lb://REMINDER-SERVICE
+          predicates:
+            - Path=/reminderservice/**
+          filters:
+            - StripPrefix=1
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@ipKeyResolver}"
+                redis-rate-limiter.replenishRate: ${RATE_LIMIT_PER_SECOND:20}
+                redis-rate-limiter.burstCapacity: ${RATE_LIMIT_BURST:40}
+                redis-rate-limiter.requestedTokens: 1
+
+app:
+  jwt:
+    # CONTRACT: must be the same secret auth-service signs with. Dev default only - set JWT_SECRET elsewhere.
+    secret: ${JWT_SECRET:dev-only-secret-change-me-dev-only-secret-change-me}
+    issuer: airline-auth-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+# Registers as API-GATEWAY. Set EUREKA_ENABLED=false only if you give routes fixed URLs instead of lb://.
+eureka:
+  client:
+    enabled: ${EUREKA_ENABLED:true}
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+  instance:
+    prefer-ip-address: true
+
+logging:
+  level:
+    com.airline: INFO

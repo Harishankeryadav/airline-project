@@ -1,0 +1,7 @@
+# Dev profile: also loads sample flights so search has data to return.
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/dev
+logging:
+  level:
+    com.airline: DEBUG

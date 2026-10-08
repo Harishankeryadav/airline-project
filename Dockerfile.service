@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# One Dockerfile for every Spring Boot service. Build a service with:
+#   docker build -f Dockerfile.service --build-arg MODULE=flights-service -t airline/flights-service .
+# (docker-compose.yml does this for you: docker compose --profile app up --build)
+# ---------- build stage: compile only the requested module (+ the parent pom) ----------
+FROM maven:3.9-eclipse-temurin-21 AS build
+ARG MODULE
+WORKDIR /workspace
+COPY . .
+# The cache mount keeps downloaded dependencies between builds, so rebuilding one service is quick.
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn -B -q -pl ${MODULE} -am package -DskipTests
+
+# ---------- runtime stage: a small JRE image, running as a non-root user ----------
+FROM eclipse-temurin:21-jre-alpine
+ARG MODULE
+RUN addgroup -S app && adduser -S app -G app
+WORKDIR /app
+COPY --from=build /workspace/${MODULE}/target/*.jar app.jar
+USER app
+# Several JVMs share one machine: cap each at a share of the container's memory instead of the host's.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]

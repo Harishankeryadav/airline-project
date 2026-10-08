@@ -1,0 +1,74 @@
+server:
+  port: ${SERVER_PORT:8083}
+
+spring:
+  application:
+    name: booking-service
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:booking_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${DB_USERNAME:airline}
+    password: ${DB_PASSWORD:airline}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none      # schema is owned by Flyway
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    connection-timeout: 3000      # fail fast instead of hanging a booking when RabbitMQ is down
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 2000
+            read-timeout: 5000
+            # No retries are configured on purpose: "reserve seats" is not idempotent.
+
+# How to reach flights-service. Empty = look it up in Eureka by name (FLIGHTS-SERVICE).
+# Set e.g. FLIGHTS_URL=http://localhost:8081 to run without the registry.
+clients:
+  flights:
+    url: ${FLIGHTS_URL:}
+
+app:
+  jwt:
+    # CONTRACT: must be the same secret auth-service signs with. Dev default only - set JWT_SECRET elsewhere.
+    secret: ${JWT_SECRET:dev-only-secret-change-me-dev-only-secret-change-me}
+    issuer: airline-auth-service
+  recovery:
+    interval-ms: ${RECOVERY_INTERVAL_MS:60000}
+    grace-seconds: 30
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+# Registers as BOOKING-SERVICE. Set EUREKA_ENABLED=false to run this service completely on its own.
+eureka:
+  client:
+    enabled: ${EUREKA_ENABLED:true}
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+  instance:
+    prefer-ip-address: true
+
+logging:
+  level:
+    com.airline: INFO
