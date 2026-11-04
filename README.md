@@ -1,6 +1,6 @@
 # Airline Microservices (Spring Boot)
 
-Migration of the Node.js airline backend (5 services) to Spring Boot microservices.
+Airline backend (5 services) Spring Boot microservices.
 **How the services connect (names, routes, JWT, events, failure handling): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).**
 
 | Service | Replaces (Node) | Status | Port |
