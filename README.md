@@ -233,7 +233,7 @@ Retries: a failed email is retried after 5, 10, 15... minutes up to 5 attempts, 
   bug could read it. React escapes output by default and the app renders no raw HTML. Signing out only forgets the token; it stays valid on the server until it expires.
 - Fares are formatted with `VITE_CURRENCY` (default INR); the backend stores plain numbers with no currency.
 
-- **Not compiled or run end-to-end.** Written in a sandbox without Maven Central. Syntax-checked with `javac` and the Lombok accessors cross-checked, but expect to fix a small compile/startup issue on the first `mvn test` / run. Paste the error and it gets fixed. Dependency versions (Spring Boot 3.4.5, Spring Cloud 2024.0.1, springdoc 2.8.6, jjwt 0.12.6) are from memory.
+- Written in a sandbox without Maven Central. Syntax-checked with `javac` and the Lombok accessors cross-checked, but expect to fix a small compile/startup issue on the first `mvn test` / run. Paste the error and it gets fixed. Dependency versions (Spring Boot 3.4.5, Spring Cloud 2024.0.1, springdoc 2.8.6, jjwt 0.12.6) are from memory.
 - The gateway protects only what goes **through** it. Locally every service port is open; in a real deployment publish only port 8080 (flights-service writes and `seats/*` have no login of their own).
 - If the reserve call **times out** the booking is marked `FAILED`; in the rare case flights-service did take the seats they stay unavailable (the safe side). Reservation ids would remove this ambiguity.
 - A booking left `PENDING` by a crash between steps 2 and 3 is not auto-reconciled yet.
